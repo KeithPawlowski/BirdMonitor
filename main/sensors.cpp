@@ -11,7 +11,7 @@ Adafruit_AHTX0 aht10; // AHT10 for outdoor temperature and humidity
 Adafruit_VEML7700 veml7700 = Adafruit_VEML7700(); // VEML7700 for indoor light
 Adafruit_TSL2591 tsl2591 = Adafruit_TSL2591(2591); // TSL2591 for outdoor light
 
-// Initialize all sensors
+// Initialize all sensors and create the log file
 void sensorsInit() {
     // Initialize SHT31 at I2C address 0x44; halt if initialization fails
     if (!sht31.begin(0x44)) {
@@ -33,6 +33,16 @@ void sensorsInit() {
     tsl2591.setGain(TSL2591_GAIN_MED);
     // Set TSL2591 integration time to 300ms for light measurement
     tsl2591.setTiming(TSL2591_INTEGRATIONTIME_300MS);
+
+    char filepath[40];  // TODO: is this too small?
+    const char* filename = "sensorReadings.csv"; // hard-coded sensorReading
+    sprintf(filepath, "/LogFiles/", filename);
+
+    // Build column headers
+    char headerLine[100];
+    sprintf(headerLine, "YYYY-MM-DD-HH:MM:SS,Inside Light,Inside Temp,Outside Light,Outside Temp");
+    // Append the line to the specified file on SD card
+    appendFile(SD_MMC, filepath, headerLine);
 }
 
 // Scale light sensor lux value to a range suitable for logging
@@ -47,7 +57,7 @@ float scaleLight(float lux) {
 // Log sensor data to a specified file with a timestamp
 void logSensorData(const char* filename, const char* data) {
     // Construct file path for logging in /LogFiles directory
-    char filepath[40];
+    char filepath[40];  // TODO: is this too small?
     sprintf(filepath, "/LogFiles/%s", filename);
 
     // Get current time from RTC
@@ -60,7 +70,7 @@ void logSensorData(const char* filename, const char* data) {
 
     // Combine timestamp and data into a single line
     char line[100];
-    sprintf(line, "%s - %s\n", timeStr, data);
+    sprintf(line, "%s,%s\n", timeStr, data);
     // Append the line to the specified file on SD card
     appendFile(SD_MMC, filepath, line);
 }
@@ -68,24 +78,24 @@ void logSensorData(const char* filename, const char* data) {
 // Sensor task to periodically read and log sensor data
 void sensorTask(void *pvParameters) {
     while (1) {
-        // Check if not recording, not in cooldown, and acquire sensor semaphore
+        // Check if not recording, not in cooldown, and acquired sensor semaphore
         if (!recording && !cooldown && xSemaphoreTake(sensorSemaphore, portMAX_DELAY) == pdTRUE) {
-            // Read indoor temperature from SHT31
+            // Read indoor temperature from SHT31 into sht_data
             float sht_temp = sht31.readTemperature();
             char sht_data[20];
             // Format temperature data
-            sprintf(sht_data, "Temp: %.2f C", sht_temp);
+            sprintf(sht_data, "%.2f,", sht_temp);
             // Log to instmp.log
-            logSensorData("instmp.log", sht_data);
+            logSensorData("sensorReadings.csv", sht_data);
 
             // Read outdoor temperature and humidity from AHT10
             sensors_event_t humidity, temp;
             aht10.getEvent(&humidity, &temp);
             char aht_data[20];
             // Format temperature data
-            sprintf(aht_data, "Temp: %.2f C", temp.temperature);
+            sprintf(aht_data, "%.2f,", temp.temperature);
             // Log to outtmp.log
-            logSensorData("outtmp.log", aht_data);
+            logSensorData("sensorReadings.csv", aht_data);
 
             // Read indoor light level from VEML7700
             float veml_lux = veml7700.readLux();
@@ -93,9 +103,9 @@ void sensorTask(void *pvParameters) {
             float in_light_scaled = scaleLight(veml_lux);
             char veml_data[20];
             // Format light data
-            sprintf(veml_data, "Light: %.2f", in_light_scaled);
+            sprintf(veml_data, "%.2f,", in_light_scaled);
             // Log to inlight.log
-            logSensorData("inlight.log", veml_data);
+            logSensorData("sensorReadings.csv", veml_data);
 
             // Read outdoor light level from TSL2591
             uint32_t lum = tsl2591.getFullLuminosity();
@@ -107,14 +117,14 @@ void sensorTask(void *pvParameters) {
             float out_light_scaled = scaleLight(tsl_lux);
             char tsl_data[20];
             // Format light data
-            sprintf(tsl_data, "Light: %.2f", out_light_scaled);
+            sprintf(tsl_data, "%.2f,", out_light_scaled);
             // Log to outlight.log
-            logSensorData("outlight.log", tsl_data);
+            logSensorData("sensorReadings.csv", tsl_data);
 
             // Release sensor semaphore
             xSemaphoreGive(sensorSemaphore);
         }
         // Delay for 10 minutes (600,000ms) before next sensor reading
-        vTaskDelay(600000 / portTICK_PERIOD_MS);
+        vTaskDelay(600000 / portTICK_PERIOD_MS);    //parameterize
     }
 }
