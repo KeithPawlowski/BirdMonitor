@@ -44,6 +44,7 @@ volatile int frame_count = 0;
 int total_frame_index = 0;
 // Track active buffer index
 volatile int activeBuffer = 0;
+int debug = 0;
 
 // Semaphores for thread-safe access
 SemaphoreHandle_t bufferSemaphore;
@@ -73,7 +74,10 @@ int findNextCaptureIndex(fs::FS &fs, const char *dirname) {
     File root = fs.open(dirname);
     // Check if directory is valid
     if (!root || !root.isDirectory()) {
-        return 0; // Return 0 if directory can't be opened
+        if (debug) {
+            Serial.printf("findNextCaptureIndex(): Error 1: Failed to open directory \"%s\"\n", dirname);
+        }
+        return 1; // Return 1 if directory can't be opened
     }
 
     int highestIndex = -1;
@@ -84,8 +88,8 @@ int findNextCaptureIndex(fs::FS &fs, const char *dirname) {
             const char *name = file.name();
             // Check for directories named "captureXXXX"
             if (strncmp(name, "capture", 7) == 0 && strlen(name) == 11) {
-                int index = atoi(name + 7);
-                if (index >= 0 && index <= 9999) {
+                int index = atoi(name + 7); //extract number
+                if (index >= 0 && index <= 9999) { // must be 4 digits
                     if (index > highestIndex) {
                         highestIndex = index;
                     }
@@ -98,11 +102,18 @@ int findNextCaptureIndex(fs::FS &fs, const char *dirname) {
 
     // Return next available index
     int nextIndex = (highestIndex >= 0) ? highestIndex + 1 : 0;
+    if (debug) {
+        Serial.printf("findNextCaptureIndex(): Highest capture index found: %d, starting at: %d\n", highestIndex, nextIndex);
+    }
     return nextIndex;
 }
 
 // Write a batch of frames to SD card
 void writeBatchToSD(int bufferNum, int count, const char* folderName) {
+    if (debug) {
+        Serial.printf("writeBatchToSD(): Core %d: Writing %d frames from buffer %d at index %d to %s\n", 
+            xPortGetCoreID(), count, bufferNum, total_frame_index, folderName);
+    }
     // Write each frame as a JPEG file
     for (int i = 0; i < count; i++) {
         char filename[40];
@@ -153,7 +164,13 @@ void i2s_install() {
         .use_apll = false // No APLL clock
     };
     // Install I2S driver
-    i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+    esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+    if (debug){
+        if (err != ESP_OK){
+            Serial.printf("i2s_install(): Error 2: I2S install failed: %d\n", err);
+            return;
+        } 
+    }
 }
 
 // Set I2S pin configuration
@@ -166,11 +183,19 @@ void i2s_setpin() {
         .data_in_num = I2S_SD // Serial data input
     };
     // Assign pins to I2S port
-    i2s_set_pin(I2S_PORT, &pin_config);
+    esp_err_t err = i2s_set_pin(I2S_PORT, &pin_config);
+    if (debug){
+        if (err != ESP_OK) Serial.printf("i2s_setpin(): I2S set pin failed: %d\n", err);
+        return;
+    }
 }
 
 // Task to handle audio recording
 void audioTask(void *pvParameters) {
+    if (debug == 2) {
+        Serial.println("Audio task started");
+
+    }
     while (1) {
         // If audio recording is active
         if (audioRecording) {
@@ -183,7 +208,12 @@ void audioTask(void *pvParameters) {
                 audioBytesWritten += bytesRead;
                 // Stop if buffer is full
                 if (audioBytesWritten >= AUDIO_BUFFER_SIZE) {
+                    if (debug == 2){
+                        Serial.println("Audio buffer full, stopping");
+                    }
                     audioRecording = false;
+                } else if (debug && result != ESP_OK) {
+                    Serial.printf("Audio read error: %d\n", result);   
                 }
             }
         }
@@ -200,6 +230,9 @@ void stopAudioRecording(const char* folderName) {
     if (xSemaphoreTake(audioSemaphore, 2000 / portTICK_PERIOD_MS) == pdTRUE) {
         // Stop I2S port
         i2s_stop(I2S_PORT);
+        if (debug) {
+            Serial.printf("Audio recording stopped, bytes written: %d\n", audioBytesWritten);
+        }
         if (audioBytesWritten > 0) {
             // Apply volume gain to audio data
             for (size_t i = 0; i < audioBytesWritten; i += SAMPLE_BITS / 8) {
@@ -217,10 +250,16 @@ void stopAudioRecording(const char* folderName) {
                 file.write(wav_header, WAV_HEADER_SIZE);
                 file.write(audioBuffer, audioBytesWritten);
                 file.close();
+                if (debug) {
+                    Serial.printf("Wrote %d bytes of audio to %s\n", audioBytesWritten + WAV_HEADER_SIZE, audioPath);
+                }
             }
+            // else {output failure to log file}
         }
         // Release audio semaphore
         xSemaphoreGive(audioSemaphore);
+    } else if (debug) {
+            Serial.println("Failed to stop audio recording cleanly");
     }
 }
 
@@ -247,6 +286,9 @@ void pirTask(void *pvParameters) {
         // Check if not recording, not in cooldown, and PIR sensor is triggered (LOW)
         if (!recording && !cooldown && digitalRead(PIR_PIN) == LOW) {
             // Start recording
+            if (debug) {
+                Serial.println("Motion detected, starting recording...");
+            }
             recording = true;
 
             // Create new capture folder
@@ -346,6 +388,9 @@ void pirTask(void *pvParameters) {
 // Arduino setup function
 void setup() {
     // Initialize WS2812 LED
+    if (debug){
+        Serial.begin(9600);
+    }
     ws2812Init();
     // Initialize SD card
     sdmmcInit();
@@ -366,17 +411,25 @@ void setup() {
     sensorsInit();
 
     // Initialize RTC; halt if failed
-    if (!rtc.begin(&Wire)) {
+    if (debug && !rtc.begin(&Wire)) {
+        Serial.println("Couldn't find DS3231 RTC");
+        ws2812SetColor(1);
         while (1) delay(10);
     }
 
     // Check for PSRAM (no action taken)
-    if (psramFound()) {
+    if (debug && psramFound()) {
+        size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+        Serial.printf("Detected PSRAM size: %u bytes (~%u MB)\n", psram_size, psram_size / (1024 * 1024));
     } else {
     }
 
     // Initialize camera; halt if failed
     if (cameraSetup() != 1) {
+        ws2812SetColor(1);
+        if (debug) {
+            Serial.println("No camera detected!");
+        }
         while (1) delay(10);
     }
 
@@ -465,6 +518,9 @@ int cameraSetup(void) {
     // Initialize camera with configuration
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
+        if (debug) {
+            Serial.printf("Camera init failed: 0x%x", err);
+        }
         return 0; // Return 0 on failure
     }
 

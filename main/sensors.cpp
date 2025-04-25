@@ -10,23 +10,38 @@ Adafruit_SHT31 sht31 = Adafruit_SHT31(); // SHT31 for indoor temperature
 Adafruit_AHTX0 aht10; // AHT10 for outdoor temperature and humidity
 Adafruit_VEML7700 veml7700 = Adafruit_VEML7700(); // VEML7700 for indoor light
 Adafruit_TSL2591 tsl2591 = Adafruit_TSL2591(2591); // TSL2591 for outdoor light
+int debug2 = 0;
 
 // Initialize all sensors
 void sensorsInit() {
     // Initialize SHT31 at I2C address 0x44; halt if initialization fails
     if (!sht31.begin(0x44)) {
+        if (debug2){
+            Serial.println("Couldn't find SHT31 (temp sensor)");
+        }
         while (1) delay(10);
     }
     // Initialize AHT10 on I2C bus; halt if initialization fails
     if (!aht10.begin(&Wire)) {
+        if (debug2) {
+            Serial.println("Couldn't find AHT10 (temp + humidity)");
+
+        }       
         while (1) delay(10);
     }
     // Initialize VEML7700 on I2C bus; halt if initialization fails
     if (!veml7700.begin(&Wire)) {
-        while (1) delay(10);
+        if (debug2) {
+            Serial.println("Couldn't find VEML7700 (light sensor)");
+        }   
+             while (1) delay(10);
     }
     // Initialize TSL2591 on I2C bus; halt if initialization fails
     if (!tsl2591.begin(&Wire)) {
+        if (debug2) {
+            Serial.println("Couldn't find TSL2591 (light sensor)");
+
+        }   
         while (1) delay(10);
     }
     // Set TSL2591 gain to medium for balanced sensitivity
@@ -113,6 +128,9 @@ void sensorTask(void *pvParameters) {
 
             // Release sensor semaphore
             xSemaphoreGive(sensorSemaphore);
+        }
+        if (debug2) {
+            Serial.println("sensorTask(): Environmental data logged successfully");
         }
         // Delay for 10 minutes (600,000ms) before next sensor reading
         vTaskDelay(600000 / portTICK_PERIOD_MS);
