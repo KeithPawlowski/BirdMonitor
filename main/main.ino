@@ -44,7 +44,7 @@ volatile int frame_count = 0;
 int total_frame_index = 0;
 // Track active buffer index
 volatile int activeBuffer = 0;
-int debug = 0;
+int debug = 1;
 
 // Semaphores for thread-safe access
 SemaphoreHandle_t bufferSemaphore;
@@ -389,7 +389,7 @@ void pirTask(void *pvParameters) {
 void setup() {
     // Initialize WS2812 LED
     if (debug){
-        Serial.begin(9600);
+        Serial.begin(115200);
     }
     ws2812Init();
     // Initialize SD card

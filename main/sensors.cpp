@@ -10,7 +10,7 @@ Adafruit_SHT31 sht31 = Adafruit_SHT31(); // SHT31 for indoor temperature
 Adafruit_AHTX0 aht10; // AHT10 for outdoor temperature and humidity
 Adafruit_VEML7700 veml7700 = Adafruit_VEML7700(); // VEML7700 for indoor light
 Adafruit_TSL2591 tsl2591 = Adafruit_TSL2591(2591); // TSL2591 for outdoor light
-int debug2 = 0;
+int debug2 = 1;
 
 // Initialize all sensors
 void sensorsInit() {
